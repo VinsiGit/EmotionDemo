@@ -5,96 +5,86 @@ from pydub import AudioSegment
 import io
 import librosa
 import soundfile as sf
+import numpy as np
 import torch
-import torch.nn.functional as F
-from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
-from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
+from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2Processor
+from pathlib import Path
+# Load model and processor
+model = Wav2Vec2ForSequenceClassification.from_pretrained("Dpngtm/wav2vec2-emotion-recognition")
+processor = Wav2Vec2Processor.from_pretrained("Dpngtm/wav2vec2-emotion-recognition")
+model.eval()  # Ensure model is in eval mode
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# https://huggingface.co/superb/wav2vec2-base-superb-er
-# feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained("superb/wav2vec2-base-superb-er")
-# model = Wav2Vec2ForSequenceClassification.from_pretrained("superb/wav2vec2-base-superb-er")
-
-# https://huggingface.co/prithivMLmods/Speech-Emotion-Classification
-
-feature_extractor = AutoFeatureExtractor.from_pretrained("prithivMLmods/Speech-Emotion-Classification")
-model = AutoModelForAudioClassification.from_pretrained("prithivMLmods/Speech-Emotion-Classification")
-
-model = model.to(device).eval()
-
-id2label = {
-    "0": "Anger",
-    "1": "Calm",
-    "2": "Disgust",
-    "3": "Fear",
-    "4": "Happy",
-    "5": "Neutral",
-    "6": "Sad",
-    "7": "Surprised"
-}
-
+# FastAPI setup
 app = FastAPI(
-    title="Emotion AppAPI",
+    title="Emotion App API",
     description="API for emotion prediction from audio.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
+
+# Enable CORS
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
+# Response model
 class EmotionResponse(BaseModel):
     emotion: str
     confidence: float
 
-
 @app.post("/predict_emotion", response_model=EmotionResponse)
 async def predict_emotion(file: UploadFile = File(...)):
     try:
+        # Read file content
         raw = await file.read()
-        # Convert WebM/Opus to WAV in memory
-        audio_seg = AudioSegment.from_file(io.BytesIO(raw), format="webm")
+        ext = Path(file.filename).suffix.lower().replace('.', '')
+
+        # Convert to mono WAV at 16kHz
+        audio_seg = AudioSegment.from_file(io.BytesIO(raw), format=ext)
         audio_seg = audio_seg.set_frame_rate(16000).set_channels(1)
+
+        # Export to in-memory buffer
         wav_io = io.BytesIO()
         audio_seg.export(wav_io, format="wav")
         wav_io.seek(0)
+
+        # Load audio with soundfile
         audio, rate = sf.read(wav_io, dtype="float32")
+        if len(audio.shape) > 1:
+            audio = audio.mean(axis=1)  # Convert stereo to mono
+
         if rate != 16000:
             audio = librosa.resample(audio, orig_sr=rate, target_sr=16000)
             rate = 16000
 
-        # Extract features
-        inputs = feature_extractor(
-            audio,
-            sampling_rate=rate,
-            return_tensors="pt",
-            padding=True
-            )
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        # Ensure audio isn't silent
+        if np.std(audio) < 1e-5:
+            raise HTTPException(status_code=400, detail="Audio is too silent or empty.")
 
+        # Process input
+        inputs = processor(audio, sampling_rate=rate, return_tensors="pt", padding=True)
+
+        # Forward pass
         with torch.no_grad():
-            logits = model(**inputs).logits
-            # probs = torch.nn.functional.softmax(logits, dim=1).squeeze().tolist()
-            probs = F.softmax(logits, dim=-1).squeeze().tolist()
-            # confidence = probs[0][predicted_id].item()  # Get probability for top class
-            if isinstance(probs[0], list):  # batch dimension
-                probs = probs[0]
+            outputs = model(**inputs)
+            probs = torch.nn.functional.softmax(outputs.logits, dim=-1).squeeze()
 
-            top_idx = int(torch.argmax(torch.tensor(probs)))
-            top_label = id2label[str(top_idx)]
-            confidence = round(probs[top_idx], 4)
+        # Get label mapping from model config
+        id2label = model.config.id2label
+        emotion_labels = ["angry", "calm", "disgust", "fearful", "happy", "neutral", "sad", "surprised"]
 
-            return {
-                    "emotion": top_label,
-                    "confidence":round(confidence, 4)
-                    }
+        # Get predicted emotion
+        top_idx = torch.argmax(probs).item()
+        confidence = probs[top_idx].item()
+        predicted_emotion = emotion_labels[top_idx]
 
-
+        return EmotionResponse(emotion=predicted_emotion, confidence=confidence)
 
     except Exception as e:
-            print("Error in /predict_emotion:", e)  # Add this line
-            raise HTTPException(status_code=500, detail=str(e))
+        print("Error in /predict_emotion:", str(e))
+        raise HTTPException(status_code=500, detail="Error processing audio: " + str(e))
