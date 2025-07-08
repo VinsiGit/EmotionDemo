@@ -4,3 +4,4 @@ soundfile
 transformers
 librosa
 torch
+pydantic
