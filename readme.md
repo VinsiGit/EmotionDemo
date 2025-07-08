@@ -64,7 +64,7 @@ This project is an emotion detection demo that uses a Python backend with FastAP
     pip install -r requirements.txt
     ```
 
-    This will install `fastapi`, `soundfile`, `transformers`, `librosa`, and `torch`.
+    This will install `fastapi`, `uvicorn`, `soundfile`, `transformers`, `librosa`, and `torch`.
 
 ## Running the Application
 
