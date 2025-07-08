@@ -1,10 +1,10 @@
-# Emotion App
+# Emotion Demo
 
 This project is an emotion detection demo that uses a Python backend with FastAPI to serve an emotion recognition model and a simple HTML/CSS/JavaScript frontend to interact with it.
 
 ## Table of Contents
 
-- [Emotion App](#emotion-app)
+- [Emotion Demo](#emotion-demo)
   - [Table of Contents](#table-of-contents)
   - [Features](#features)
   - [Prerequisites](#prerequisites)
@@ -32,8 +32,8 @@ This project is an emotion detection demo that uses a Python backend with FastAP
 1.  **Clone the repository (if applicable):**
 
     ```bash
-    git clone <repository_url>
-    cd emotionApp
+    git clone https://github.com/VinsiGit/EmotionDemo.git
+    cd EmotionDemo
     ```
 
 2.  **Create a Python virtual environment:**
