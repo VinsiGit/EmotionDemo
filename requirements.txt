@@ -5,3 +5,5 @@ transformers
 librosa
 torch
 pydantic
+python-multipart
+pydub
